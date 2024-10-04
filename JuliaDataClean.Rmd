@@ -1,0 +1,150 @@
+---
+title: "Julia's Data Project"
+author: "Sahithi R. Gangaram"
+date: "2024-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(janitor)
+
+```
+
+
+```{r, cleaning}
+
+# Load all the sheets
+sheets <- excel_sheets("C:\\Users\\Owner\\Desktop\\Julia's Data Prj\\Diabetic Patients Data for August 2023 to 2024 v3 (1).xlsx")
+
+# Load the specific sheets for LDL, A1C, BP, and BMI
+ldl_data <- read_excel("C:\\Users\\Owner\\Desktop\\Julia's Data Prj\\Diabetic Patients Data for August 2023 to 2024 v3 (1).xlsx", sheet = "LDL")
+a1c_data <- read_excel("C:\\Users\\Owner\\Desktop\\Julia's Data Prj\\Diabetic Patients Data for August 2023 to 2024 v3 (1).xlsx", sheet = "A1C")
+bp_data <- read_excel("C:\\Users\\Owner\\Desktop\\Julia's Data Prj\\Diabetic Patients Data for August 2023 to 2024 v3 (1).xlsx", sheet = "BP")
+bmi_data <- read_excel("C:\\Users\\Owner\\Desktop\\Julia's Data Prj\\Diabetic Patients Data for August 2023 to 2024 v3 (1).xlsx", sheet = "BMI")
+
+# Clean and standardize the LDL sheet
+clean_ldl <- function(df) {
+  df_cleaned <- df %>%
+    clean_names() %>% 
+    mutate(across(where(is.character), ~ na_if(., "n/a"))) %>% # Replace 'n/a' with NA
+    select(patientid, labdate, labvalue_3) %>% 
+    rename(ldl_cholesterol = labvalue_3) %>% 
+    mutate(ldl_cholesterol = as.numeric(ldl_cholesterol)) 
+  return(df_cleaned)
+}
+
+# Clean and standardize the A1C sheet
+clean_a1c <- function(df) {
+  df_cleaned <- df %>%
+    clean_names() %>%
+    mutate(across(where(is.character), ~ na_if(., "n/a"))) %>%
+    select(patientid, labdate, a1c) %>% 
+    mutate(a1c_numeric = as.numeric(a1c)) %>% 
+    select(patientid, labdate, a1c_numeric) 
+  return(df_cleaned)
+}
+
+# Clean and standardize the BPsheet
+clean_bp <- function(df) {
+  df_cleaned <- df %>%
+    clean_names() %>%
+    mutate(across(where(is.character), ~ na_if(., "n/a"))) %>%
+    separate(enc_bp, into = c("enc_systolic", "enc_diastolic"), sep = "/", convert = TRUE, remove = FALSE) %>%
+    mutate(systolic = as.numeric(systolic),
+           diastolic = as.numeric(diastolic),
+           consistent_bp = if_else(systolic == enc_systolic & diastolic == enc_diastolic, TRUE, FALSE)) %>%
+    select(enc_bp_date, patientid, systolic, diastolic) %>% 
+    rename(labdate = enc_bp_date) 
+  return(df_cleaned)
+}
+
+# Clean and standardize the BMI sheet
+clean_bmi <- function(df) {
+  df_cleaned <- df %>%
+    clean_names() %>%
+    mutate(across(where(is.character), ~ na_if(., "n/a"))) %>%
+    mutate(bmi_numeric = as.numeric(enc_bmi)) %>%
+    select(enc_bmi_date, patientid, bmi_numeric) %>%
+    rename(labdate = enc_bmi_date) 
+  return(df_cleaned)
+}
+
+ldl_cleaned <- clean_ldl(ldl_data)
+a1c_cleaned <- clean_a1c(a1c_data)
+bp_cleaned <- clean_bp(bp_data)
+bmi_cleaned <- clean_bmi(bmi_data)
+
+head(ldl_cleaned)
+head(a1c_cleaned)
+head(bp_cleaned)
+head(bmi_cleaned)
+
+# Combine all sheets by patientid and labdate into a master sheet
+master_sheet <- full_join(ldl_cleaned, a1c_cleaned, by = c("patientid", "labdate")) %>%
+  full_join(., bp_cleaned, by = c("patientid", "labdate")) %>%
+  full_join(., bmi_cleaned, by = c("patientid", "labdate"))
+
+head(master_sheet)
+
+```
+```{r, example searching values for specific patients}
+# Searching for the A1C value for patient 520 on Mar-01
+result_a1c <- master_sheet %>%
+  filter(patientid == 520 & labdate == as.Date("2024-03-01")) %>%
+  select(a1c_numeric)
+
+print(result_a1c)
+
+# Searching for the A1C value for patient 520 on Mar-01
+result_ldl <- master_sheet %>%
+  filter(patientid == 520 & labdate == as.Date("2024-03-01")) %>%
+  select(ldl_cholesterol)
+
+print(result_ldl)
+```
+```{r, creating the sample tables}
+# Assign sample numbers and remove the labdate column
+assign_sample_numbers_no_labdate <- function(df, value_column) {
+  df %>%
+    group_by(patientid) %>%                 
+    arrange(labdate) %>%                    
+    mutate(sample_num = paste0("Sample_", row_number())) %>%  
+    select(-labdate) %>%                    
+    pivot_wider(names_from = sample_num, values_from = {{ value_column }}) %>% 
+    ungroup()  
+}
+
+# Apply this function to each biomarker
+
+# Assign sample numbers for LDL Cholesterol
+ldl_samples <- assign_sample_numbers_no_labdate(master_sheet %>% select(patientid, labdate, ldl_cholesterol), ldl_cholesterol)
+
+# Assign sample numbers for A1C
+a1c_samples <- assign_sample_numbers_no_labdate(master_sheet %>% select(patientid, labdate, a1c_numeric), a1c_numeric)
+
+# Assign sample numbers for BMI
+bmi_samples <- assign_sample_numbers_no_labdate(master_sheet %>% select(patientid, labdate, bmi_numeric), bmi_numeric)
+
+# Assign sample numbers for Systolic and Diastolic BP together
+bp_samples <- master_sheet %>%
+  select(patientid, labdate, systolic, diastolic) %>%
+  group_by(patientid) %>%
+  arrange(labdate) %>%
+  mutate(sample_num = paste0("Sample_", row_number())) %>%
+  select(-labdate) %>%                    
+  pivot_wider(names_from = sample_num, values_from = c(systolic, diastolic)) %>%
+  ungroup()
+
+head(ldl_samples)
+head(a1c_samples)
+head(bmi_samples)
+head(bp_samples)
+
+```
+
